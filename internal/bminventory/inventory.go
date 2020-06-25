@@ -9,6 +9,8 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -1542,4 +1544,133 @@ func setPullSecret(cluster *common.Cluster, pullSecret string) {
 	} else {
 		cluster.PullSecretSet = false
 	}
+}
+
+type ipSet map[strfmt.IPv4]struct{}
+
+func (s ipSet) Add(str strfmt.IPv4) {
+	s[str] = struct{}{}
+}
+
+func (s ipSet) Intersect(other ipSet) ipSet {
+	ret := make(ipSet)
+	for k := range s {
+		if v, ok := other[k]; ok {
+			ret[k] = v
+		}
+	}
+	return ret
+}
+
+func freeAddressesUnmarshal(network, freeAddressesStr string, prefix *string) (ipSet, error) {
+	var unmarshaled models.FreeNetworksAddresses
+	err := json.Unmarshal([]byte(freeAddressesStr), &unmarshaled)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range unmarshaled {
+		if f.Network == network {
+			ret := make(ipSet)
+			for _, a := range f.FreeAddresses {
+				if prefix == nil || strings.HasPrefix(a.String(), *prefix) {
+					ret.Add(a)
+				}
+			}
+			return ret, nil
+		}
+	}
+	return nil, errors.Errorf("No network %s found", network)
+}
+
+func ipAsUint(ipStr string, log logrus.FieldLogger) uint64 {
+	parts := strings.Split(ipStr, ".")
+	if len(parts) != 4 {
+		log.Warnf("Invalid ip %s", ipStr)
+		return 0
+	}
+	var result uint64 = 0
+	for _, p := range parts {
+		result = result << 8
+		converted, err := strconv.ParseUint(p, 10, 64)
+		if err != nil {
+			log.WithError(err).Warnf("Conversion of %s to uint", p)
+			return 0
+		}
+		result += converted
+	}
+	return result
+}
+
+func applyLimit(ret models.FreeAddressesList, limitParam *int64) models.FreeAddressesList {
+	if limitParam != nil && *limitParam >= 0 && *limitParam < int64(len(ret)) {
+		return ret[:*limitParam]
+	}
+	return ret
+}
+
+func (b *bareMetalInventory) getFreeAddresses(params installer.GetFreeAddressesParams, log logrus.FieldLogger) middleware.Responder {
+	var hosts []*models.Host
+	err := b.db.Select("free_addresses").Find(&hosts, "cluster_id = ? and status in (?)", params.ClusterID.String(), []string{host.HostStatusInsufficient, host.HostStatusKnown}).Error
+	if err != nil {
+		return common.NewApiError(http.StatusInternalServerError, errors.Wrapf(err, "Error retreiving hosts for cluster %s", params.ClusterID.String()))
+	}
+	if len(hosts) == 0 {
+		return common.NewApiError(http.StatusNotFound, errors.Errorf("No hosts where found for cluster %s", params.ClusterID))
+	}
+	var (
+		availableFreeAddresses []string
+		emptyResponse          = installer.NewGetFreeAddressesOK().WithPayload(models.FreeAddressesList{})
+	)
+	for _, h := range hosts {
+		if h.FreeAddresses != "" {
+			availableFreeAddresses = append(availableFreeAddresses, h.FreeAddresses)
+		}
+	}
+	if len(availableFreeAddresses) == 0 {
+		return emptyResponse
+	}
+	var sets []ipSet
+	// Create IP sets from each of the hosts free-addresses
+	for _, a := range availableFreeAddresses {
+		s, err := freeAddressesUnmarshal(params.Network, a, params.Prefix)
+		if err != nil {
+			log.WithError(err).Warn("Could not unmarshal free addresses")
+			continue
+		}
+		// TODO: Have to decide if we want to filter empty sets
+		sets = append(sets, s)
+	}
+	if len(sets) == 0 {
+		return emptyResponse
+	}
+
+	// Perform set intersection between all valid sets
+	resultingSet := sets[0]
+	for _, s := range sets[1:] {
+		resultingSet = resultingSet.Intersect(s)
+	}
+	ret := models.FreeAddressesList{}
+	for a := range resultingSet {
+		ret = append(ret, a)
+	}
+
+	// Sort addresses
+	sort.Slice(ret, func(i, j int) bool {
+		return ipAsUint(ret[i].String(), log) < ipAsUint(ret[j].String(), log)
+	})
+
+	ret = applyLimit(ret, params.Limit)
+
+	return installer.NewGetFreeAddressesOK().WithPayload(ret)
+}
+
+func (b *bareMetalInventory) GetFreeAddresses(ctx context.Context, params installer.GetFreeAddressesParams) middleware.Responder {
+	log := logutil.FromContext(ctx, b.log)
+
+	responder := b.getFreeAddresses(params, log)
+	switch responderValue := responder.(type) {
+	case *common.ApiErrorResponse:
+		log.WithError(responderValue).Warn("GetFreeAddresses")
+	}
+	return responder
 }

@@ -329,6 +329,9 @@ const (
 
 	// HostStatusError captures enum value "error"
 	HostStatusError string = "error"
+
+	// HostStatusResetting captures enum value "resetting"
+	HostStatusResetting string = "resetting"
 )
 
 // prop value enum

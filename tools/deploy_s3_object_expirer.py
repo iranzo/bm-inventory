@@ -1,10 +1,13 @@
+# -*- coding: utf-8 -*-
 import os
 import utils
 import argparse
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--deploy-tag", help='Tag for all deployment images', type=str, default='latest')
+parser.add_argument(
+    "--deploy-tag", help="Tag for all deployment images", type=str, default="latest"
+)
 args = parser.parse_args()
 
 
@@ -15,7 +18,10 @@ def main():
         with open(dst_file, "w+") as dst:
             data = src.read()
             if args.deploy_tag:
-                data = data.replace("REPLACE_IMAGE", "quay.io/ocpmetal/s3-object-expirer:{}".format(args.deploy_tag))
+                data = data.replace(
+                    "REPLACE_IMAGE",
+                    "quay.io/ocpmetal/s3-object-expirer:{}".format(args.deploy_tag),
+                )
             else:
                 data = data.replace("REPLACE_IMAGE", os.environ.get("OBJEXP"))
             print("Deploying {}".format(dst_file))

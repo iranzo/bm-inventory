@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import utils
 import argparse
@@ -6,7 +7,9 @@ import yaml
 parser = argparse.ArgumentParser()
 parser.add_argument("--target")
 parser.add_argument("--domain")
-parser.add_argument("--deploy-tag", help='Tag for all deployment images', type=str, default='latest')
+parser.add_argument(
+    "--deploy-tag", help="Tag for all deployment images", type=str, default="latest"
+)
 
 args = parser.parse_args()
 
@@ -31,22 +34,24 @@ def main():
             data = data.replace("REPLACE_PORT", '"{}"'.format(service_port))
             print("Deploying {}".format(DST_FILE))
 
-            if args.deploy_tag is not "":
-                versions = {"IMAGE_BUILDER": "quay.io/ocpmetal/installer-image-build:",
-                            "AGENT_DOCKER_IMAGE": "quay.io/ocpmetal/agent:",
-                            "KUBECONFIG_GENERATE_IMAGE": "quay.io/ocpmetal/ignition-manifests-and-kubeconfig-generate:",
-                            "INSTALLER_IMAGE": "quay.io/ocpmetal/assisted-installer:",
-                            "CONNECTIVITY_CHECK_IMAGE": "quay.io/ocpmetal/connectivity_check:",
-                            "INVENTORY_IMAGE": "quay.io/ocpmetal/inventory:",
-                            "HARDWARE_INFO_IMAGE": "quay.io/ocpmetal/hardware_info:",
-                            "SELF_VERSION": "quay.io/ocpmetal/installer-image-build:"}
+            if args.deploy_tag != "":
+                versions = {
+                    "IMAGE_BUILDER": "quay.io/ocpmetal/installer-image-build:",
+                    "AGENT_DOCKER_IMAGE": "quay.io/ocpmetal/agent:",
+                    "KUBECONFIG_GENERATE_IMAGE": "quay.io/ocpmetal/ignition-manifests-and-kubeconfig-generate:",
+                    "INSTALLER_IMAGE": "quay.io/ocpmetal/assisted-installer:",
+                    "CONNECTIVITY_CHECK_IMAGE": "quay.io/ocpmetal/connectivity_check:",
+                    "INVENTORY_IMAGE": "quay.io/ocpmetal/inventory:",
+                    "HARDWARE_INFO_IMAGE": "quay.io/ocpmetal/hardware_info:",
+                    "SELF_VERSION": "quay.io/ocpmetal/installer-image-build:",
+                }
                 versions = {k: v + args.deploy_tag for k, v in versions.items()}
                 y = yaml.load(data)
-                y['data'].update(versions)
+                y["data"].update(versions)
                 data = yaml.dump(y)
             else:
                 y = yaml.load(data)
-                y['data'].update({"SELF_VERSION": os.environ.get("SERVICE")})
+                y["data"].update({"SELF_VERSION": os.environ.get("SERVICE")})
                 data = yaml.dump(y)
             dst.write(data)
 
